@@ -1,0 +1,156 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-script
+  namespace: sample-app
+data:
+  script.js: |
+    const express = require('express');
+    const redis = require('redis');
+    const os = require('os');
+    const app = express();
+    const client = redis.createClient({ url: 'redis://redis.sample-app.svc.cluster.local:6379' });
+
+    let requestCount = 0;
+
+    (async () => {
+      await client.connect();
+    })();
+
+    app.get('/', async (req, res) => {
+      requestCount++;
+      const startTime = Date.now();
+      const uptime = process.uptime();
+      const host = os.hostname();
+      const platform = os.platform();
+      const nodeVersion = process.version;
+      const endTime = Date.now();
+      const handlingTime = endTime - startTime;
+
+      const htmlResponse = `
+      <!DOCTYPE html>
+      <html lang='en'>
+      <head>
+        <meta charset='UTF-8'>
+        <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+        <title>Backend Info</title>
+        <style>
+          body {
+            font-family: Arial, sans-serif;
+            margin: 40px;
+            background-color: #f4f4f9;
+            color: #333;
+          }
+          h1 {
+            color: #444;
+          }
+          table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+          }
+          th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+          }
+          th {
+            background-color: #4CAF50;
+            color: white;
+          }
+          tr:nth-child(even) {
+            background-color: #f2f2f2;
+          }
+        </style>
+      </head>
+      <body>
+        <h1>Backend Information</h1>
+        <table>
+          <tr>
+            <th>Attribute</th>
+            <th>Value</th>
+          </tr>
+          <tr>
+            <td>Hostname</td>
+            <td>${host}</td>
+          </tr>
+          <tr>
+            <td>Platform</td>
+            <td>${platform}</td>
+          </tr>
+          <tr>
+            <td>Node.js Version</td>
+            <td>${nodeVersion}</td>
+          </tr>
+          <tr>
+            <td>Uptime</td>
+            <td>${uptime.toFixed(2)} seconds</td>
+          </tr>
+          <tr>
+            <td>Request Count</td>
+            <td>${requestCount}</td>
+          </tr>
+          <tr>
+            <td>Request Handling Time</td>
+            <td>${handlingTime} ms</td>
+          </tr>
+        </table>
+      </body>
+      </html>
+      `;
+
+      res.send(htmlResponse);
+    });
+
+    app.get('/data', async (req, res) => {
+      await client.set('key', 'value');
+      const value = await client.get('key');
+      res.send('Data from Redis: ' + value);
+    });
+
+    app.listen(3000, () => {
+      console.log('Backend running on port 3000');
+    });
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: sample-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      containers:
+      - name: backend
+        image: sample-backend:v1
+        imagePullPolicy: Never
+        command: ["node"]
+        args: ["/app/script.js"]
+        volumeMounts:
+        - name: script-volume
+          mountPath: /app/script.js
+          subPath: script.js
+      volumes:
+      - name: script-volume
+        configMap:
+          name: backend-script
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: sample-app
+spec:
+  selector:
+    app: backend
+  ports:
+    - protocol: TCP
+      port: 3000
+      targetPort: 3000
