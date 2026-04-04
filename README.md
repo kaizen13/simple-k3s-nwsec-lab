@@ -32,12 +32,17 @@ This lab provides a complete environment for learning and testing Kubernetes net
 ### Installation
 
 ```bash
+# Make scripts executable
+chmod +x scripts/*.sh
+
 # Step 1: Install K3s, MetalLB, and Traefik
-sudo bash scripts/install_k3s.sh
+./scripts/install_k3s.sh
 
 # Step 2: Deploy the sample application
-sudo bash scripts/deploy_sample_app.sh
+./scripts/deploy_sample_app.sh
 ```
+
+> **Note:** The scripts will request sudo privileges when needed for system-level operations (installing K3s, modifying /etc/hosts, container operations). User-level configuration is handled automatically.
 
 ### Access the Application
 
@@ -121,10 +126,10 @@ MetalLB is configured with the following settings:
 
 ### HTTP→HTTPS Redirect
 
-The redirect is implemented using a Traefik Middleware:
+The redirect is implemented using a Traefik Middleware and IngressRoute CRDs:
 
 ```yaml
-apiVersion: traefik.containo.us/v1alpha1
+apiVersion: traefik.io/v1alpha1  # Use traefik.io for Traefik v3.x
 kind: Middleware
 metadata:
   name: sample-app-redirect-https
@@ -136,12 +141,26 @@ spec:
     port: "443"
 ```
 
-Referenced in the Ingress annotation:
+Referenced in IngressRoute:
 ```yaml
-annotations:
-  traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
-  traefik.ingress.kubernetes.io/router.middlewares: sample-app-redirect-https@kubernetescrd
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: sample-app-http
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`demo.jwst.lan`)
+      kind: Rule
+      services:
+        - name: frontend
+          port: 80
+      middlewares:
+        - name: sample-app-redirect-https
 ```
+
+> **Note:** Traefik v3.x works best with IngressRoute CRDs instead of standard Kubernetes Ingress resources. Standard Ingress has issues with middleware discovery in Traefik v3.x.
 
 ### TLS Configuration
 
@@ -234,10 +253,10 @@ EOF
 
 ```bash
 # Remove the sample application only
-sudo bash scripts/remove_sample_app.sh
+./scripts/remove_sample_app.sh
 
 # Complete uninstall (K3s, MetalLB, Traefik, all resources)
-sudo bash scripts/uninstall_all.sh
+./scripts/uninstall_all.sh
 ```
 
 ## Troubleshooting

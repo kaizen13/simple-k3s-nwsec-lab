@@ -5,46 +5,105 @@ set -e  # Exit on error
 echo "=========================================="
 echo "K3s Network Security Lab - Installation"
 echo "=========================================="
+echo ""
 
-# Install K3s
+# =============================================================================
+# Privilege Check - Request sudo once at the start
+# =============================================================================
+echo "Checking privileges..."
+if ! sudo -v 2>/dev/null; then
+  echo "Error: This script requires sudo privileges."
+  echo "Please ensure your user has sudo access and try again."
+  exit 1
+fi
+echo "  Sudo privileges verified."
+
+# Keep sudo timestamp alive during long operations
+while true; do sudo -n true; sleep 60; kill -0 "$$" 2>/dev/null || exit 0; done 2>/dev/null &
+SUDO_KEEPALIVE=$!
+trap "kill $SUDO_KEEPALIVE 2>/dev/null" EXIT
+
+# Preserve user's HOME and original user info
+ORIGINAL_USER="$SUDO_USER"
+if [ -z "$ORIGINAL_USER" ]; then
+  ORIGINAL_USER="$(whoami)"
+fi
+ORIGINAL_HOME="/home/$ORIGINAL_USER"
+
+echo "  Running as user: $ORIGINAL_USER"
+echo ""
+
+# =============================================================================
+# Step 1: Install K3s
+# =============================================================================
 echo "[1/7] Installing K3s..."
 curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--tls-san=k3s-node1 --disable traefik" sh -
+echo "  K3s installed successfully."
+echo ""
 
-# Enable and start buildkit service
+# =============================================================================
+# Step 2: Enable buildkit service
+# =============================================================================
 echo "[2/7] Enabling buildkit service..."
 sudo systemctl enable --now buildkit
+echo "  Buildkit service enabled."
+echo ""
 
-# Wait for K3s to be ready
+# =============================================================================
+# Step 3: Wait for K3s to be ready
+# =============================================================================
 echo "[3/7] Waiting for K3s to be ready..."
-while ! sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl --insecure-skip-tls-verify get nodes; do
+while ! sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl --insecure-skip-tls-verify get nodes > /dev/null 2>&1; do
   echo "  Waiting for K3s nodes..."
   sleep 5
 done
+echo "  K3s is ready."
+echo ""
 
-# Set up kubectl for the current user
+# =============================================================================
+# Step 4: Set up kubectl for the current user
+# =============================================================================
 echo "[4/7] Setting up kubectl..."
-sudo mkdir -p "$HOME/.kube"
-sudo cp /etc/rancher/k3s/k3s.yaml "$HOME/.kube/config"
-sudo chown -R "$(id -u):$(id -g)" "$HOME/.kube"
-echo 'export KUBECONFIG=$HOME/.kube/config' >> "$HOME/.bashrc" || true
+
+# Create .kube directory in user's home
+sudo mkdir -p "$ORIGINAL_HOME/.kube"
+sudo cp /etc/rancher/k3s/k3s.yaml "$ORIGINAL_HOME/.kube/config"
+sudo chown -R "$ORIGINAL_USER:$ORIGINAL_USER" "$ORIGINAL_HOME/.kube"
+
+# Update user's bashrc
+if ! grep -q 'export KUBECONFIG' "$ORIGINAL_HOME/.bashrc" 2>/dev/null; then
+  echo 'export KUBECONFIG=$HOME/.kube/config' | sudo tee -a "$ORIGINAL_HOME/.bashrc" > /dev/null
+fi
 
 # Create kubectl wrapper for TLS verification
 echo "  Creating kubectl wrapper..."
 echo '#!/bin/bash' | sudo tee /usr/local/bin/kubectl-wrapper > /dev/null
 echo 'exec kubectl --insecure-skip-tls-verify "$@"' | sudo tee -a /usr/local/bin/kubectl-wrapper > /dev/null
 sudo chmod +x /usr/local/bin/kubectl-wrapper
-echo 'alias kubectl="kubectl-wrapper"' >> "$HOME/.bashrc" || true
+
+# Add alias to user's bashrc
+if ! grep -q 'alias kubectl="kubectl-wrapper"' "$ORIGINAL_HOME/.bashrc" 2>/dev/null; then
+  echo 'alias kubectl="kubectl-wrapper"' | sudo tee -a "$ORIGINAL_HOME/.bashrc" > /dev/null
+fi
+
+echo "  kubectl configured for user: $ORIGINAL_USER"
+echo ""
 
 KUBECTL=/usr/local/bin/kubectl-wrapper
 
+# =============================================================================
 # Get paths
+# =============================================================================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
-# Install MetalLB
+# =============================================================================
+# Step 5: Install MetalLB
+# =============================================================================
 echo "[5/7] Installing MetalLB..."
 
 # Create metallb-system namespace with pod security labels
+echo "  Creating metallb-system namespace with PSA labels..."
 $KUBECTL apply -f - <<EOF
 apiVersion: v1
 kind: Namespace
@@ -76,7 +135,12 @@ sleep 5
 $KUBECTL get ipaddresspool -n metallb-system || echo "  Warning: IPAddressPool not found"
 $KUBECTL get l2advertisement -n metallb-system || echo "  Warning: L2Advertisement not found"
 
-# Install Traefik
+echo "  MetalLB installed successfully."
+echo ""
+
+# =============================================================================
+# Step 6: Install Traefik
+# =============================================================================
 echo "[6/7] Installing Traefik..."
 
 # Add Helm repo
@@ -85,12 +149,17 @@ helm repo update
 
 # Install Traefik with proper configuration
 echo "  Installing Traefik via Helm..."
+
+# Install Traefik with basic configuration
 helm install traefik traefik/traefik \
   -n kube-system \
   --kube-insecure-skip-tls-verify \
-  --set ports.websecure.http.tls.enabled=true \
-  --set ports.websecure.http.tls.certResolver="" \
+  --set "ports.websecure.http.tls.enabled=true" \
   --wait --timeout=5m
+
+# Note: Traefik v3.x works best with IngressRoute CRDs instead of standard Ingress
+# The deploy_sample_app.sh script uses IngressRoute resources which Traefik watches
+# automatically across all namespaces (no namespace restriction needed)
 
 # Wait for Traefik to be ready
 echo "  Waiting for Traefik to be ready..."
@@ -119,10 +188,15 @@ if [ -z "$EXTERNAL_IP" ]; then
   EXTERNAL_IP="172.20.20.20"
 fi
 
-# Update /etc/hosts
+echo "  Traefik installed successfully."
+echo ""
+
+# =============================================================================
+# Step 7: Update /etc/hosts
+# =============================================================================
 echo "[7/7] Updating /etc/hosts..."
 if ! grep -q "demo.jwst.lan" /etc/hosts; then
-  echo "$EXTERNAL_IP demo.jwst.lan" | sudo tee -a /etc/hosts
+  echo "$EXTERNAL_IP demo.jwst.lan" | sudo tee -a /etc/hosts > /dev/null
   echo "  Added entry: $EXTERNAL_IP demo.jwst.lan"
 else
   echo "  Entry already exists in /etc/hosts"
@@ -135,7 +209,7 @@ echo "=========================================="
 echo ""
 echo "Next steps:"
 echo "  1. Deploy the sample application:"
-echo "     sudo bash scripts/deploy_sample_app.sh"
+echo "     ./scripts/deploy_sample_app.sh"
 echo ""
 echo "  2. Access the application at:"
 echo "     https://demo.jwst.lan"

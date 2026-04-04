@@ -79,12 +79,17 @@ This is a **Kubernetes networking and security lab** built on K3s (lightweight K
 ### Initial Setup (Fresh Environment)
 
 ```bash
+# Make scripts executable
+chmod +x scripts/*.sh
+
 # Step 1: Install K3s, MetalLB, and Traefik
-sudo bash scripts/install_k3s.sh
+./scripts/install_k3s.sh
 
 # Step 2: Deploy the sample application
-sudo bash scripts/deploy_sample_app.sh
+./scripts/deploy_sample_app.sh
 ```
+
+> **Note:** Scripts request sudo privileges internally when needed for system operations. User-level configuration is handled automatically.
 
 ### Accessing the Application
 
@@ -136,50 +141,55 @@ Due to self-signed certificates, use the wrapper script:
 - Labels follow pattern: `app.kubernetes.io/name: sample-app`, `app.kubernetes.io/component: <component>`
 - Services use ClusterIP (default) for internal communication
 
-### Ingress Configuration
+### IngressRoute Configuration
 
-The ingress uses Traefik-specific annotations for HTTP→HTTPS redirect:
+The ingress uses Traefik's native IngressRoute CRDs for proper middleware support in Traefik v3.x:
 
 ```yaml
-apiVersion: networking.k8s.io/v1
-kind: Ingress
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
 metadata:
-  name: sample-app-ingress
+  name: sample-app-http
   namespace: sample-app
   labels:
     app.kubernetes.io/name: sample-app
-    app.kubernetes.io/component: ingress
-  annotations:
-    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
-    traefik.ingress.kubernetes.io/router.middlewares: sample-app-redirect-https@kubernetescrd
+    app.kubernetes.io/component: ingressroute
 spec:
-  ingressClassName: traefik
-  rules:
-  - host: demo.jwst.lan
-    http:
-      paths:
-      - backend:
-          service:
-            name: frontend
-            port:
-              number: 80
-        path: /
-        pathType: Prefix
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`demo.jwst.lan`)
+      kind: Rule
+      services:
+        - name: frontend
+          port: 80
+      middlewares:
+        - name: sample-app-redirect-https
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: sample-app-https
+  namespace: sample-app
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`demo.jwst.lan`)
+      kind: Rule
+      services:
+        - name: frontend
+          port: 80
   tls:
-  - hosts:
-    - demo.jwst.lan
     secretName: demo-lab-local-tls
 ```
 
-**Important:** The middleware name in the annotation must match the Middleware resource name exactly:
-- Annotation reference: `sample-app-redirect-https@kubernetescrd`
-- Middleware name: `sample-app-redirect-https`
-- Middleware namespace: `sample-app`
+> **Important:** Traefik v3.x has issues with standard Kubernetes Ingress resources when using middlewares. Use IngressRoute CRDs instead for reliable middleware discovery.
 
 ### Middleware Configuration
 
 ```yaml
-apiVersion: traefik.containo.us/v1alpha1
+apiVersion: traefik.io/v1alpha1  # Use traefik.io for Traefik v3.x
 kind: Middleware
 metadata:
   name: sample-app-redirect-https
@@ -352,18 +362,36 @@ EOF
 - MetalLB runs in privileged mode (required for L2 advertisement)
 - Consider adding ResourceQuotas for production-like testing
 
+## Important Notes
+
+### Traefik v3.x Requires IngressRoute CRDs
+
+Traefik v3.x has issues with standard Kubernetes Ingress resources when using middlewares. **Always use IngressRoute CRDs** instead:
+
+```yaml
+# Correct for Traefik v3.x - Use IngressRoute
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+```
+
+Standard Ingress resources with middleware annotations will result in "middleware does not exist" errors.
+
+### API Group Change
+
+Traefik v3.x uses `traefik.io/v1alpha1` API group instead of the deprecated `traefik.containo.us/v1alpha1`. All Middleware and IngressRoute resources must use the new API group.
+
 ## Related Files
 
 | File | Purpose |
 |------|---------|
-| `backend/k8s/ingress-updated.yaml` | Ingress + Middleware (recommended, all-in-one) |
+| `backend/k8s/ingress-updated.yaml` | IngressRoute + Middleware (recommended, all-in-one) |
 | `backend/k8s/middleware-redirect.yaml` | Standalone Middleware |
 | `backend/k8s/backend-deployment.yaml` | Backend deployment with ConfigMap |
 | `backend/k8s/metallb-config.yaml` | MetalLB IP pool with L2 advertisement |
-| `scripts/install_k3s.sh` | Full K3s + MetalLB + Traefik install (with PSA) |
-| `scripts/deploy_sample_app.sh` | Application deployment |
+| `scripts/install_k3s.sh` | Full K3s + MetalLB + Traefik install (with PSA labels, requests sudo internally) |
+| `scripts/deploy_sample_app.sh` | Application deployment (requests sudo for container ops) |
 | `scripts/remove_sample_app.sh` | Remove application only |
-| `scripts/uninstall_all.sh` | Complete cleanup |
+| `scripts/uninstall_all.sh` | Complete cleanup with confirmation prompt |
 
 ## Version Information
 

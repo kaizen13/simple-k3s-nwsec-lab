@@ -1,48 +1,57 @@
 # Sample Application Ingress Configuration
-# This file contains both the Ingress resource and the HTTP→HTTPS redirect Middleware
+# Uses Traefik IngressRoute CRD for proper middleware support in Traefik v3.x
 #
 # Features:
 # - TLS termination with custom certificate
 # - Automatic HTTP to HTTPS redirect (308 Permanent Redirect)
-# - Traefik ingress controller
+# - Traefik IngressRoute (native CRD)
 #
 # Usage:
 #   kubectl apply -f ingress-updated.yaml
 
-apiVersion: networking.k8s.io/v1
-kind: Ingress
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
 metadata:
-  name: sample-app-ingress
+  name: sample-app-http
   namespace: sample-app
   labels:
     app.kubernetes.io/name: sample-app
-    app.kubernetes.io/component: ingress
-  annotations:
-    # Traefik entrypoints for HTTP and HTTPS
-    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
-    # Reference to the redirect middleware (namespace-name@kubernetescrd)
-    traefik.ingress.kubernetes.io/router.middlewares: sample-app-redirect-https@kubernetescrd
+    app.kubernetes.io/component: ingressroute
 spec:
-  ingressClassName: traefik
-  rules:
-  - host: demo.jwst.lan
-    http:
-      paths:
-      - backend:
-          service:
-            name: frontend
-            port:
-              number: 80
-        path: /
-        pathType: Prefix
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`demo.jwst.lan`)
+      kind: Rule
+      services:
+        - name: frontend
+          port: 80
+      middlewares:
+        - name: sample-app-redirect-https
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: sample-app-https
+  namespace: sample-app
+  labels:
+    app.kubernetes.io/name: sample-app
+    app.kubernetes.io/component: ingressroute
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`demo.jwst.lan`)
+      kind: Rule
+      services:
+        - name: frontend
+          port: 80
   tls:
-  - hosts:
-    - demo.jwst.lan
     secretName: demo-lab-local-tls
 ---
 # HTTP to HTTPS Redirect Middleware
-# This middleware is referenced by the Ingress above
-apiVersion: traefik.containo.us/v1alpha1
+# IMPORTANT: For Traefik v3.x, use traefik.io/v1alpha1 API group
+apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:
   name: sample-app-redirect-https

@@ -1,38 +1,110 @@
 #!/bin/bash
 
-# Get the script directory for absolute paths
+set -e  # Exit on error
+
+echo "=========================================="
+echo "K3s Network Security Lab - Deploy App"
+echo "=========================================="
+echo ""
+
+# =============================================================================
+# Privilege Check - Request sudo once at the start
+# =============================================================================
+echo "Checking privileges..."
+if ! sudo -v 2>/dev/null; then
+  echo "Error: This script requires sudo privileges for container operations."
+  echo "Please ensure your user has sudo access and try again."
+  exit 1
+fi
+echo "  Sudo privileges verified."
+
+# Keep sudo timestamp alive during long operations
+while true; do sudo -n true; sleep 60; kill -0 "$$" 2>/dev/null || exit 0; done 2>/dev/null &
+SUDO_KEEPALIVE=$!
+trap "kill $SUDO_KEEPALIVE 2>/dev/null" EXIT
+
+# Preserve user's HOME and original user info
+ORIGINAL_USER="$SUDO_USER"
+if [ -z "$ORIGINAL_USER" ]; then
+  ORIGINAL_USER="$(whoami)"
+fi
+ORIGINAL_HOME="/home/$ORIGINAL_USER"
+
+echo "  Running as user: $ORIGINAL_USER"
+echo ""
+
+# =============================================================================
+# Get paths and setup
+# =============================================================================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 # Use kubectl wrapper for TLS verification
 KUBECTL=/usr/local/bin/kubectl-wrapper
 
-# Create a namespace for the sample app
-$KUBECTL create namespace sample-app
+# Verify kubectl wrapper exists
+if [ ! -x "$KUBECTL" ]; then
+  echo "Error: kubectl wrapper not found at $KUBECTL"
+  echo "Please run ./scripts/install_k3s.sh first."
+  exit 1
+fi
 
-# Clean up nerdctl cache to prevent build issues
-echo "Cleaning up nerdctl cache..."
+# Verify K3s is running
+if ! $KUBECTL cluster-info > /dev/null 2>&1; then
+  echo "Error: Cannot connect to K3s cluster."
+  echo "Please ensure K3s is installed and running."
+  exit 1
+fi
+
+echo "K3s cluster connection verified."
+echo ""
+
+# =============================================================================
+# Create namespace
+# =============================================================================
+echo "[1/6] Creating namespace..."
+$KUBECTL create namespace sample-app --dry-run=client -o yaml | $KUBECTL apply -f -
+echo "  Namespace 'sample-app' created/verified."
+echo ""
+
+# =============================================================================
+# Clean up nerdctl cache
+# =============================================================================
+echo "[2/6] Cleaning up nerdctl cache..."
 sudo nerdctl system prune -a -f
+echo "  Nerdctl cache cleaned."
+echo ""
 
-# Build the backend image with nerdctl
-echo "Building the backend image..."
-sudo nerdctl --namespace=k8s.io build -t sample-backend:v1 backend/
+# =============================================================================
+# Build backend image
+# =============================================================================
+echo "[3/6] Building backend image..."
+cd "$PROJECT_DIR/backend"
+sudo -E nerdctl --namespace=k8s.io build -t sample-backend:v1 .
+echo "  Backend image built: sample-backend:v1"
+echo ""
 
-# Save the image to a tar file
-echo "Saving the image to a tar file..."
-sudo nerdctl --namespace=k8s.io save sample-backend:v1 -o sample-backend.tar
-
-# Import the image into K3s
-echo "Importing the image into K3s..."
+# =============================================================================
+# Save and import image
+# =============================================================================
+echo "[4/6] Saving and importing image..."
+sudo nerdctl --namespace=k8s.io save sample-backend:v1 -o "$PROJECT_DIR/sample-backend.tar"
 sudo k3s ctr images import "$PROJECT_DIR/sample-backend.tar"
+echo "  Image imported into K3s."
+echo ""
 
-# Deploy Redis (Database Tier)
-kubectl apply -f - <<EOF
+# =============================================================================
+# Deploy Redis
+# =============================================================================
+echo "[5/6] Deploying Redis..."
+$KUBECTL apply -f - <<EOF
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: redis
   namespace: sample-app
+  labels:
+    app: redis
 spec:
   replicas: 1
   selector:
@@ -54,6 +126,8 @@ kind: Service
 metadata:
   name: redis
   namespace: sample-app
+  labels:
+    app: redis
 spec:
   selector:
     app: redis
@@ -62,17 +136,29 @@ spec:
       port: 6379
       targetPort: 6379
 EOF
+echo "  Redis deployed."
+echo ""
 
-# Deploy Node.js Backend (Backend Tier)
+# =============================================================================
+# Deploy Backend
+# =============================================================================
+echo "[6/6] Deploying Backend..."
 $KUBECTL apply -f "$PROJECT_DIR/backend/k8s/backend-deployment.yaml"
+echo "  Backend deployed."
+echo ""
 
-# Deploy Nginx Frontend (Frontend Tier)
+# =============================================================================
+# Deploy Frontend
+# =============================================================================
+echo "Deploying Frontend..."
 $KUBECTL apply -f - <<EOF
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: frontend
   namespace: sample-app
+  labels:
+    app: frontend
 spec:
   replicas: 1
   selector:
@@ -120,6 +206,8 @@ kind: Service
 metadata:
   name: frontend
   namespace: sample-app
+  labels:
+    app: frontend
 spec:
   selector:
     app: frontend
@@ -128,42 +216,75 @@ spec:
       port: 80
       targetPort: 80
 EOF
+echo "  Frontend deployed."
+echo ""
 
+# =============================================================================
 # Create TLS certificates
+# =============================================================================
 echo "Creating TLS certificates..."
-openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout tls.key -out tls.crt -subj "/CN=demo.jwst.lan" -addext "subjectAltName=DNS:demo.jwst.lan"
+cd "$PROJECT_DIR"
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout tls.key -out tls.crt \
+  -subj "/CN=demo.jwst.lan" \
+  -addext "subjectAltName=DNS:demo.jwst.lan" 2>/dev/null
 
+# Set proper ownership for generated certificates
+sudo chown "$ORIGINAL_USER:$ORIGINAL_USER" tls.crt tls.key
+sudo chmod 644 tls.crt
+sudo chmod 600 tls.key
+
+echo "  TLS certificates generated."
+echo ""
+
+# =============================================================================
 # Create Kubernetes secret for TLS
-echo "Creating Kubernetes secret for TLS..."
-$KUBECTL create secret tls demo-lab-local-tls --cert="$PROJECT_DIR/tls.crt" --key="$PROJECT_DIR/tls.key" -n sample-app
+# =============================================================================
+echo "Creating TLS secret..."
+$KUBECTL delete secret demo-lab-local-tls -n sample-app --ignore-not-found
+$KUBECTL create secret tls demo-lab-local-tls \
+  --cert="$PROJECT_DIR/tls.crt" \
+  --key="$PROJECT_DIR/tls.key" \
+  -n sample-app
+echo "  TLS secret created."
+echo ""
 
+# =============================================================================
 # Update /etc/hosts
+# =============================================================================
 echo "Updating /etc/hosts..."
-echo "172.20.20.20 demo.jwst.lan" | sudo tee -a /etc/hosts
+if ! grep -q "demo.jwst.lan" /etc/hosts; then
+  echo "172.20.20.20 demo.jwst.lan" | sudo tee -a /etc/hosts > /dev/null
+  echo "  Added entry to /etc/hosts"
+else
+  echo "  Entry already exists in /etc/hosts"
+fi
+echo ""
 
-# Create Ingress for the sample app
-$KUBECTL apply -f - <<EOF
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: sample-app-ingress
-  namespace: sample-app
-  annotations:
-    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
-spec:
-  tls:
-  - hosts:
-    - demo.jwst.lan
-    secretName: demo-lab-local-tls
-  rules:
-  - host: demo.jwst.lan
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: frontend
-            port:
-              number: 80
-EOF
+# =============================================================================
+# Deploy IngressRoute and Middleware
+# =============================================================================
+echo "Deploying IngressRoute and Middleware..."
+$KUBECTL apply -f "$PROJECT_DIR/backend/k8s/ingress-updated.yaml"
+echo "  IngressRoute and Middleware deployed."
+echo ""
+
+# =============================================================================
+# Wait for pods to be ready
+# =============================================================================
+echo "Waiting for pods to be ready..."
+$KUBECTL wait --for=condition=ready pod -l app=redis -n sample-app --timeout=60s || true
+$KUBECTL wait --for=condition=ready pod -l app=backend -n sample-app --timeout=60s || true
+$KUBECTL wait --for=condition=ready pod -l app=frontend -n sample-app --timeout=60s || true
+
+echo ""
+echo "=========================================="
+echo "Deployment Complete!"
+echo "=========================================="
+echo ""
+echo "Access the application at:"
+echo "  https://demo.jwst.lan"
+echo ""
+echo "Note: Your browser will show a security warning"
+echo "      due to the self-signed certificate."
+echo "=========================================="

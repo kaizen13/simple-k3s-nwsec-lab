@@ -1,14 +1,17 @@
 # Traefik Middleware for HTTP to HTTPS Redirect
 # This middleware redirects all HTTP traffic to HTTPS with a 308 Permanent Redirect
 #
-# Usage: Reference in Ingress annotations as:
-#   traefik.ingress.kubernetes.io/router.middlewares: sample-app-redirect-https@kubernetescrd
+# IMPORTANT: For Traefik v3.x, use traefik.io/v1alpha1 API group
+# The older traefik.containo.us/v1alpha1 is deprecated in Traefik v3+
 #
-# Or in IngressRoute:
+# Usage: Reference in IngressRoute as:
 #   middlewares:
 #   - name: sample-app-redirect-https
+#
+# Or in standard Ingress annotations:
+#   traefik.ingress.kubernetes.io/router.middlewares: sample-app-redirect-https@kubernetescrd
 
-apiVersion: traefik.containo.us/v1alpha1
+apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:
   name: sample-app-redirect-https
