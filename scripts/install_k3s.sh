@@ -61,10 +61,20 @@ cat <<EOF | sudo tee /etc/systemd/system/buildkit.service > /dev/null
 [Unit]
 Description=BuildKit
 Documentation=https://github.com/moby/buildkit
-After=network.target
+# Wait for K3s to actually be running
+After=k3s.service
+Requires=k3s.service
 
 [Service]
-ExecStart=/usr/local/bin/buildkitd --containerd-worker=true --containerd-worker-addr /run/rancher/k3s/containerd/containerd.sock
+# We use a dash before the path to handle potential missing sockets gracefully
+ExecStart=/usr/local/bin/buildkitd \
+  --containerd-worker=true \
+  --containerd-worker-addr /run/k3s/containerd/containerd.sock
+  
+Restart=always
+RestartSec=5
+Delegate=yes
+KillMode=process
 
 [Install]
 WantedBy=multi-user.target

@@ -70,20 +70,18 @@ echo ""
 # =============================================================================
 # Clean up nerdctl cache
 # =============================================================================
-# Define the K3s Containerd socket path
-CONTAINERD_ADDRESS="/run/rancher/k3s/containerd/containerd.sock"
+# Define the sockets (Ensure these match where they actually live on your disk)
+K3S_SOCK="/run/k3s/containerd/containerd.sock"
+BK_SOCK="unix:///run/buildkit/buildkitd.sock"
 
+# [2/6] Cleaning up nerdctl cache
 echo "[2/6] Cleaning up nerdctl cache..."
-sudo nerdctl --address "$CONTAINERD_ADDRESS" system prune -a -f
-echo "  Nerdctl cache cleaned."
-echo ""
+sudo nerdctl --address "$K3S_SOCK" --buildkit-host "$BK_SOCK" system prune -a -f
 
-# =============================================================================
-# Build backend image
-# =============================================================================
+# [3/6] Building backend image
 echo "[3/6] Building backend image..."
 cd "$PROJECT_DIR/backend"
-sudo -E nerdctl --address "$CONTAINERD_ADDRESS" --namespace=k8s.io build -t sample-backend:v1 .
+sudo -E nerdctl --address "$K3S_SOCK" --namespace=k8s.io --buildkit-host "$BK_SOCK" build -t sample-backend:v1 .
 echo "  Backend image built: sample-backend:v1"
 echo ""
 
