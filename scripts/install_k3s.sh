@@ -37,17 +37,49 @@ echo ""
 # Step 1: Install K3s
 # =============================================================================
 echo "[1/7] Installing K3s..."
-curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--tls-san=k3s-node1 --disable traefik" sh -
+curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--tls-san=k3s-node1 --disable traefik --write-kubeconfig-mode 644" sh -
 echo "  K3s installed successfully."
 echo ""
 
 # =============================================================================
-# Step 2: Enable buildkit service
+# Step 2: Install BuildKit and nerdctl (The Dockerless Builder)
 # =============================================================================
-echo "[2/7] Enabling buildkit service..."
+echo "[2/7] Installing BuildKit and nerdctl..."
+
+if [ ! -f "/usr/local/bin/buildkitd" ]; then
+    echo "  Installing BuildKit..."
+# 1. Install nerdctl (CLI for containerd)
+NERDCTL_VERSION="1.7.5" # Check for latest version
+curl -L https://github.com/containerd/nerdctl/releases/download/v${NERDCTL_VERSION}/nerdctl-${NERDCTL_VERSION}-linux-amd64.tar.gz | sudo tar -C /usr/local/bin -xz
+
+# 2. Install BuildKit (The build engine)
+BK_VERSION="v0.13.1"
+curl -L https://github.com/moby/buildkit/releases/download/${BK_VERSION}/buildkit-${BK_VERSION}.linux-amd64.tar.gz | sudo tar -C /usr/local -xz
+
+# 3. Create BuildKit systemd service
+cat <<EOF | sudo tee /etc/systemd/system/buildkit.service > /dev/null
+[Unit]
+Description=BuildKit
+Documentation=https://github.com/moby/buildkit
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/buildkitd --containerd-worker=true
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# 4. Start BuildKit
+sudo systemctl daemon-reload
 sudo systemctl enable --now buildkit
-echo "  Buildkit service enabled."
+
+echo "  BuildKit and nerdctl installed successfully."
 echo ""
+
+else
+    echo "  BuildKit already installed, skipping binary download."
+fi
 
 # =============================================================================
 # Step 3: Wait for K3s to be ready
@@ -70,15 +102,19 @@ sudo mkdir -p "$ORIGINAL_HOME/.kube"
 sudo cp /etc/rancher/k3s/k3s.yaml "$ORIGINAL_HOME/.kube/config"
 sudo chown -R "$ORIGINAL_USER:$ORIGINAL_USER" "$ORIGINAL_HOME/.kube"
 
-# Update user's bashrc
-if ! grep -q 'export KUBECONFIG' "$ORIGINAL_HOME/.bashrc" 2>/dev/null; then
+# Update user's bashrc only if the entry doesn't exist
+if ! grep -q 'export KUBECONFIG=' "$ORIGINAL_HOME/.bashrc"; then
   echo 'export KUBECONFIG=$HOME/.kube/config' | sudo tee -a "$ORIGINAL_HOME/.bashrc" > /dev/null
+fi
+
+if ! grep -q 'alias kubectl=' "$ORIGINAL_HOME/.bashrc"; then
+  echo 'alias kubectl="kubectl-wrapper"' | sudo tee -a "$ORIGINAL_HOME/.bashrc" > /dev/null
 fi
 
 # Create kubectl wrapper for TLS verification
 echo "  Creating kubectl wrapper..."
 echo '#!/bin/bash' | sudo tee /usr/local/bin/kubectl-wrapper > /dev/null
-echo 'exec kubectl --insecure-skip-tls-verify "$@"' | sudo tee -a /usr/local/bin/kubectl-wrapper > /dev/null
+echo "exec kubectl --kubeconfig=$ORIGINAL_HOME/.kube/config --insecure-skip-tls-verify \"\$@\"" | sudo tee -a /usr/local/bin/kubectl-wrapper > /dev/null
 sudo chmod +x /usr/local/bin/kubectl-wrapper
 
 # Add alias to user's bashrc
@@ -90,6 +126,7 @@ echo "  kubectl configured for user: $ORIGINAL_USER"
 echo ""
 
 KUBECTL=/usr/local/bin/kubectl-wrapper
+export KUBECONFIG="$ORIGINAL_HOME/.kube/config"
 
 # =============================================================================
 # Get paths
@@ -141,6 +178,12 @@ echo ""
 # =============================================================================
 # Step 6: Install Traefik
 # =============================================================================
+
+echo "[6/7] Installing HELM"
+curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-4
+chmod 700 get_helm.sh
+./get_helm.sh
+
 echo "[6/7] Installing Traefik..."
 
 # Add Helm repo
@@ -151,7 +194,8 @@ helm repo update
 echo "  Installing Traefik via Helm..."
 
 # Install Traefik with basic configuration
-helm install traefik traefik/traefik \
+# Install or Upgrade Traefik with basic configuration
+helm upgrade --install traefik traefik/traefik \
   -n kube-system \
   --kube-insecure-skip-tls-verify \
   --set "ports.websecure.http.tls.enabled=true" \
