@@ -1,4 +1,8 @@
 #!/bin/bash
+# Force everything to point to the K3s/BuildKit sockets
+export CONTAINERD_ADDRESS="/run/rancher/k3s/containerd/containerd.sock"
+export CONTAINERD_NAMESPACE="k8s.io"
+export BUILDKIT_HOST="unix:///run/buildkit/buildkitd.sock"
 
 set -e  # Exit on error
 
@@ -70,20 +74,16 @@ echo ""
 # =============================================================================
 # Clean up nerdctl cache
 # =============================================================================
-# Define the sockets (Ensure these match where they actually live on your disk)
-K3S_SOCK="/run/k3s/containerd/containerd.sock"
-BK_SOCK="unix:///run/buildkit/buildkitd.sock"
-
-# [2/6] Cleaning up nerdctl cache
+# [2/6] Cleaning up nerdctl cache...
 echo "[2/6] Cleaning up nerdctl cache..."
-sudo nerdctl --address "$K3S_SOCK" --buildkit-host "$BK_SOCK" system prune -a -f
+# Use -E to pass our exports into the sudo session
+sudo -E nerdctl system prune -a -f
 
-# [3/6] Building backend image
+# [3/6] Building backend image...
 echo "[3/6] Building backend image..."
 cd "$PROJECT_DIR/backend"
-sudo -E nerdctl --address "$K3S_SOCK" --namespace=k8s.io --buildkit-host "$BK_SOCK" build -t sample-backend:v1 .
-echo "  Backend image built: sample-backend:v1"
-echo ""
+# Use -E here as well
+sudo -E nerdctl build -t sample-backend:v1 .
 
 # =============================================================================
 # Save and import image
