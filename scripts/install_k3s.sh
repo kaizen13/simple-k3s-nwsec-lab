@@ -64,7 +64,7 @@ Documentation=https://github.com/moby/buildkit
 After=network.target
 
 [Service]
-ExecStart=/usr/local/bin/buildkitd --containerd-worker=true
+ExecStart=/usr/local/bin/buildkitd --containerd-worker=true --containerd-worker-addr /run/rancher/k3s/containerd/containerd.sock
 
 [Install]
 WantedBy=multi-user.target

@@ -70,8 +70,11 @@ echo ""
 # =============================================================================
 # Clean up nerdctl cache
 # =============================================================================
+# Define the K3s Containerd socket path
+CONTAINERD_ADDRESS="/run/rancher/k3s/containerd/containerd.sock"
+
 echo "[2/6] Cleaning up nerdctl cache..."
-sudo nerdctl system prune -a -f
+sudo nerdctl --address "$CONTAINERD_ADDRESS" system prune -a -f
 echo "  Nerdctl cache cleaned."
 echo ""
 
@@ -80,18 +83,19 @@ echo ""
 # =============================================================================
 echo "[3/6] Building backend image..."
 cd "$PROJECT_DIR/backend"
-sudo -E nerdctl --namespace=k8s.io build -t sample-backend:v1 .
+sudo -E nerdctl --address "$CONTAINERD_ADDRESS" --namespace=k8s.io build -t sample-backend:v1 .
 echo "  Backend image built: sample-backend:v1"
 echo ""
 
 # =============================================================================
 # Save and import image
 # =============================================================================
-echo "[4/6] Saving and importing image..."
-sudo nerdctl --namespace=k8s.io save sample-backend:v1 -o "$PROJECT_DIR/sample-backend.tar"
-sudo k3s ctr images import "$PROJECT_DIR/sample-backend.tar"
-echo "  Image imported into K3s."
-echo ""
+#echo "[4/6] Saving and importing image..."
+#sudo nerdctl --namespace=k8s.io save sample-backend:v1 -o "$PROJECT_DIR/sample-backend.tar"
+#sudo k3s ctr images import "$PROJECT_DIR/sample-backend.tar"
+#echo "  Image imported into K3s."
+#echo ""
+echo "  Image is now available in the k8s.io namespace."
 
 # =============================================================================
 # Deploy Redis
