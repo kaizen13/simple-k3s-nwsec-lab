@@ -34,9 +34,25 @@ echo "  Running as user: $ORIGINAL_USER"
 echo ""
 
 # =============================================================================
+# Step 0: Install Prerequisites (runc, CNI plugins, etc.)
+# =============================================================================
+echo "[0/8] Installing prerequisites..."
+
+# Get script directory to find prerequisites script
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$SCRIPT_DIR/install_prerequisites.sh" ]; then
+  bash "$SCRIPT_DIR/install_prerequisites.sh"
+  echo "  Prerequisites installation completed."
+else
+  echo "  Warning: install_prerequisites.sh not found, skipping."
+  echo "  nerdctl may fail to build images without required dependencies."
+fi
+echo ""
+
+# =============================================================================
 # Step 1: Install K3s
 # =============================================================================
-echo "[1/7] Installing K3s..."
+echo "[1/8] Installing K3s..."
 curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--tls-san=k3s-node1 --disable traefik --write-kubeconfig-mode 644" sh -
 echo "  K3s installed successfully."
 echo ""
@@ -44,33 +60,46 @@ echo ""
 # =============================================================================
 # Step 2: Install BuildKit and nerdctl (The Dockerless Builder)
 # =============================================================================
-echo "[2/7] Installing BuildKit and nerdctl..."
+echo "[2/8] Installing BuildKit and nerdctl..."
 
 if [ ! -f "/usr/local/bin/buildkitd" ]; then
-    echo "  Installing BuildKit..."
-# 1. Install nerdctl (CLI for containerd)
-NERDCTL_VERSION="1.7.5" # Check for latest version
-curl -L https://github.com/containerd/nerdctl/releases/download/v${NERDCTL_VERSION}/nerdctl-${NERDCTL_VERSION}-linux-amd64.tar.gz | sudo tar -C /usr/local/bin -xz
+    echo "  Installing nerdctl..."
+    # 1. Install nerdctl (CLI for containerd)
+    NERDCTL_VERSION="1.7.7"
+    echo "  Downloading nerdctl v${NERDCTL_VERSION}..."
+    curl -L "https://github.com/containerd/nerdctl/releases/download/v${NERDCTL_VERSION}/nerdctl-${NERDCTL_VERSION}-linux-amd64.tar.gz" | \
+      sudo tar -C /usr/local/bin -xz
+    
+    # Install CNI plugins from nerdctl tarball
+    echo "  Installing CNI plugins from nerdctl package..."
+    mkdir -p /tmp/nerdctl-cni
+    curl -L "https://github.com/containerd/nerdctl/releases/download/v${NERDCTL_VERSION}/nerdctl-${NERDCTL_VERSION}-linux-amd64.tar.gz" | \
+      tar -C /tmp/nerdctl-cni -xz
+    sudo mkdir -p /opt/cni/bin
+    sudo cp /tmp/nerdctl-cni/cni-plugins/* /opt/cni/bin/ 2>/dev/null || true
+    rm -rf /tmp/nerdctl-cni
+    echo "  CNI plugins installed to /opt/cni/bin"
 
-# 2. Install BuildKit (The build engine)
-BK_VERSION="v0.13.1"
-curl -L https://github.com/moby/buildkit/releases/download/${BK_VERSION}/buildkit-${BK_VERSION}.linux-amd64.tar.gz | sudo tar -C /usr/local -xz
+    # 2. Install BuildKit (The build engine)
+    BK_VERSION="v0.15.1"
+    echo "  Installing BuildKit ${BK_VERSION}..."
+    curl -L "https://github.com/moby/buildkit/releases/download/${BK_VERSION}/buildkit-${BK_VERSION}.linux-amd64.tar.gz" | \
+      sudo tar -C /usr/local -xz
 
-# 3. Create BuildKit systemd service
-cat <<EOF | sudo tee /etc/systemd/system/buildkit.service > /dev/null
+    # 3. Create BuildKit systemd service
+    cat <<EOF | sudo tee /etc/systemd/system/buildkit.service > /dev/null
 [Unit]
 Description=BuildKit
 Documentation=https://github.com/moby/buildkit
-# Wait for K3s to actually be running
 After=k3s.service
 Requires=k3s.service
 
 [Service]
-# We use a dash before the path to handle potential missing sockets gracefully
 ExecStart=/usr/local/bin/buildkitd \
   --containerd-worker=true \
-  --containerd-worker-addr /run/k3s/containerd/containerd.sock
-  
+  --containerd-worker-addr /run/k3s/containerd/containerd.sock \
+  --containerd-worker-snapshotter=native
+
 Restart=always
 RestartSec=5
 Delegate=yes
@@ -80,21 +109,41 @@ KillMode=process
 WantedBy=multi-user.target
 EOF
 
-# 4. Start BuildKit
-sudo systemctl daemon-reload
-sudo systemctl enable --now buildkit
+    # 4. Configure nerdctl to use k8s.io namespace by default
+    sudo mkdir -p /etc/nerdctl
+    cat <<EOF | sudo tee /etc/nerdctl/nerdctl.toml > /dev/null
+namespace = "k8s.io"
+EOF
 
-echo "  BuildKit and nerdctl installed successfully."
-echo ""
+    # 5. Start BuildKit
+    echo "  Starting BuildKit service..."
+    sudo systemctl daemon-reload
+    sudo systemctl enable --now buildkit
+    
+    # Wait for BuildKit to be ready
+    echo "  Waiting for BuildKit to be ready..."
+    for i in $(seq 1 30); do
+      if sudo systemctl is-active --quiet buildkit; then
+        echo "  BuildKit service is running."
+        break
+      fi
+      if [ $i -eq 30 ]; then
+        echo "  Warning: BuildKit service did not start within 30 seconds."
+        echo "  Check logs with: sudo journalctl -u buildkit -n 50"
+      fi
+      sleep 1
+    done
 
+    echo "  BuildKit and nerdctl installed successfully."
 else
     echo "  BuildKit already installed, skipping binary download."
 fi
+echo ""
 
 # =============================================================================
 # Step 3: Wait for K3s to be ready
 # =============================================================================
-echo "[3/7] Waiting for K3s to be ready..."
+echo "[3/8] Waiting for K3s to be ready..."
 while ! sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl --insecure-skip-tls-verify get nodes > /dev/null 2>&1; do
   echo "  Waiting for K3s nodes..."
   sleep 5
@@ -105,7 +154,7 @@ echo ""
 # =============================================================================
 # Step 4: Set up kubectl for the current user
 # =============================================================================
-echo "[4/7] Setting up kubectl..."
+echo "[4/8] Setting up kubectl..."
 
 # Create .kube directory in user's home
 sudo mkdir -p "$ORIGINAL_HOME/.kube"
@@ -147,7 +196,7 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 # =============================================================================
 # Step 5: Install MetalLB
 # =============================================================================
-echo "[5/7] Installing MetalLB..."
+echo "[5/8] Installing MetalLB..."
 
 # Create metallb-system namespace with pod security labels
 echo "  Creating metallb-system namespace with PSA labels..."
@@ -189,12 +238,12 @@ echo ""
 # Step 6: Install Traefik
 # =============================================================================
 
-echo "[6/7] Installing HELM"
+echo "[6/8] Installing HELM"
 curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-4
 chmod 700 get_helm.sh
 ./get_helm.sh
 
-echo "[6/7] Installing Traefik..."
+echo "[6/8] Installing Traefik..."
 
 # Add Helm repo
 helm repo add traefik https://traefik.github.io/charts 2>/dev/null || helm repo update
@@ -248,7 +297,7 @@ echo ""
 # =============================================================================
 # Step 7: Update /etc/hosts
 # =============================================================================
-echo "[7/7] Updating /etc/hosts..."
+echo "[7/8] Updating /etc/hosts..."
 if ! grep -q "demo.jwst.lan" /etc/hosts; then
   echo "$EXTERNAL_IP demo.jwst.lan" | sudo tee -a /etc/hosts > /dev/null
   echo "  Added entry: $EXTERNAL_IP demo.jwst.lan"

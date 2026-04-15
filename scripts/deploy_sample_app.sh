@@ -1,6 +1,7 @@
 #!/bin/bash
 # Force everything to point to the K3s/BuildKit sockets
-export CONTAINERD_ADDRESS="/run/rancher/k3s/containerd/containerd.sock"
+# K3s uses /run/k3s/containerd/containerd.sock (NOT /run/rancher/k3s/...)
+export CONTAINERD_ADDRESS="/run/k3s/containerd/containerd.sock"
 export CONTAINERD_NAMESPACE="k8s.io"
 export BUILDKIT_HOST="unix:///run/buildkit/buildkitd.sock"
 
@@ -72,6 +73,36 @@ echo "  Namespace 'sample-app' created/verified."
 echo ""
 
 # =============================================================================
+# Verify prerequisites
+# =============================================================================
+echo "Verifying prerequisites..."
+
+# Check nerdctl
+if ! sudo -E nerdctl version > /dev/null 2>&1; then
+  echo "Error: nerdctl is not working."
+  echo "Please run ./scripts/install_k3s.sh first."
+  exit 1
+fi
+echo "  nerdctl: OK"
+
+# Check BuildKit
+if ! sudo systemctl is-active --quiet buildkit; then
+  echo "  Starting BuildKit service..."
+  sudo systemctl start buildkit
+  sleep 2
+fi
+echo "  BuildKit: OK"
+
+# Verify containerd socket
+if [ ! -S "$CONTAINERD_ADDRESS" ]; then
+  echo "Error: Containerd socket not found at $CONTAINERD_ADDRESS"
+  echo "Is K3s running? Check with: sudo systemctl status k3s"
+  exit 1
+fi
+echo "  Containerd socket: OK"
+echo ""
+
+# =============================================================================
 # Clean up nerdctl cache
 # =============================================================================
 # [2/6] Cleaning up nerdctl cache...
@@ -82,8 +113,8 @@ sudo -E nerdctl system prune -a -f
 # [3/6] Building backend image...
 echo "[3/6] Building backend image..."
 cd "$PROJECT_DIR/backend"
-# Use -E here as well
-sudo -E nerdctl build -t sample-backend:v1 .
+# Use -E here as well and specify the namespace explicitly
+sudo -E nerdctl --namespace=k8s.io build -t sample-backend:v1 .
 
 # =============================================================================
 # Save and import image

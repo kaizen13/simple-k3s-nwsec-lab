@@ -35,14 +35,14 @@ This lab provides a complete environment for learning and testing Kubernetes net
 # Make scripts executable
 chmod +x scripts/*.sh
 
-# Step 1: Install K3s, MetalLB, and Traefik
+# Step 1: Install prerequisites, K3s, MetalLB, and Traefik
 ./scripts/install_k3s.sh
 
 # Step 2: Deploy the sample application
 ./scripts/deploy_sample_app.sh
 ```
 
-> **Note:** The scripts will request sudo privileges when needed for system-level operations (installing K3s, modifying /etc/hosts, container operations). User-level configuration is handled automatically.
+> **Note:** The `install_k3s.sh` script automatically installs all required prerequisites (runc, CNI plugins, rootlesskit, etc.) by calling `install_prerequisites.sh`. The scripts will request sudo privileges when needed for system-level operations (installing K3s, modifying /etc/hosts, container operations). User-level configuration is handled automatically.
 
 ### Access the Application
 
@@ -98,6 +98,7 @@ The application will be available at:
 │   └── script.js                      # Express application
 ├── frontend/                          # Uses Nginx (configured in deploy script)
 ├── scripts/
+│   ├── install_prerequisites.sh       # Install runc, CNI plugins, etc.
 │   ├── install_k3s.sh                 # Install K3s, MetalLB, Traefik
 │   ├── deploy_sample_app.sh           # Deploy the 3-tier application
 │   ├── remove_sample_app.sh           # Remove application resources
