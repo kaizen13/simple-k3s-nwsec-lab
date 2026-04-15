@@ -57,6 +57,13 @@ echo ""
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
+# Load lab configuration
+CONFIG_FILE="$PROJECT_DIR/.lab-config"
+if [ -f "$CONFIG_FILE" ]; then
+  source "$CONFIG_FILE"
+fi
+LAB_FQDN="${LAB_FQDN:-demo.testlab.lan}"
+
 # Use kubectl wrapper for TLS verification if available
 KUBECTL="/usr/local/bin/kubectl-wrapper"
 if [ ! -x "$KUBECTL" ]; then
@@ -120,11 +127,11 @@ echo ""
 # Step 5: Clean up /etc/hosts
 # =============================================================================
 echo "[5/6] Cleaning up /etc/hosts..."
-if sudo grep -q "demo.jwst.lan" /etc/hosts; then
-  sudo sed -i '/demo.jwst.lan/d' /etc/hosts
-  echo "  Removed demo.jwst.lan from /etc/hosts"
+if sudo grep -q "$LAB_FQDN" /etc/hosts; then
+  sudo sed -i "/$LAB_FQDN/d" /etc/hosts
+  echo "  Removed $LAB_FQDN from /etc/hosts"
 else
-  echo "  No demo.jwst.lan entry found in /etc/hosts"
+  echo "  No $LAB_FQDN entry found in /etc/hosts"
 fi
 echo ""
 
@@ -182,5 +189,5 @@ echo "  1. ./scripts/install_k3s.sh"
 echo "  2. ./scripts/deploy_sample_app.sh"
 echo ""
 echo "Access the application at:"
-echo "  https://demo.jwst.lan"
+echo "  https://$LAB_FQDN"
 echo "=========================================="

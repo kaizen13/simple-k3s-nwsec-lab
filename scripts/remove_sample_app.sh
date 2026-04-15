@@ -25,6 +25,13 @@ echo ""
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
+# Load lab configuration
+CONFIG_FILE="$PROJECT_DIR/.lab-config"
+if [ -f "$CONFIG_FILE" ]; then
+  source "$CONFIG_FILE"
+fi
+LAB_FQDN="${LAB_FQDN:-demo.testlab.lan}"
+
 # Use kubectl wrapper for TLS verification
 KUBECTL=/usr/local/bin/kubectl-wrapper
 
@@ -83,11 +90,11 @@ echo ""
 # Remove /etc/hosts entry
 # =============================================================================
 echo "Cleaning up /etc/hosts..."
-if sudo grep -q "demo.jwst.lan" /etc/hosts; then
-  sudo sed -i '/demo.jwst.lan/d' /etc/hosts
-  echo "  Removed demo.jwst.lan from /etc/hosts"
+if sudo grep -q "$LAB_FQDN" /etc/hosts; then
+  sudo sed -i "/$LAB_FQDN/d" /etc/hosts
+  echo "  Removed $LAB_FQDN from /etc/hosts"
 else
-  echo "  No demo.jwst.lan entry found in /etc/hosts"
+  echo "  No $LAB_FQDN entry found in /etc/hosts"
 fi
 echo ""
 

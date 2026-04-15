@@ -35,28 +35,28 @@ This lab provides a complete environment for learning and testing Kubernetes net
 # Make scripts executable
 chmod +x scripts/*.sh
 
-# Step 1: Install K3s, MetalLB, and Traefik
+# Step 1: Install prerequisites, K3s, MetalLB, and Traefik
 ./scripts/install_k3s.sh
 
 # Step 2: Deploy the sample application
 ./scripts/deploy_sample_app.sh
 ```
 
-> **Note:** The scripts will request sudo privileges when needed for system-level operations (installing K3s, modifying /etc/hosts, container operations). User-level configuration is handled automatically.
+> **Note:** The `install_k3s.sh` script automatically installs all required prerequisites (runc, CNI plugins, rootlesskit, etc.) by calling `install_prerequisites.sh`. The scripts will request sudo privileges when needed for system-level operations (installing K3s, modifying /etc/hosts, container operations). User-level configuration is handled automatically.
 
 ### Access the Application
 
 The application will be available at:
-- **HTTPS:** `https://demo.jwst.lan`
-- **HTTP:** `http://demo.jwst.lan` (automatically redirects to HTTPS)
+- **HTTPS:** `https://<your-configured-fqdn>`
+- **HTTP:** `http://<your-configured-fqdn>` (automatically redirects to HTTPS)
 
-> **Note:** Your browser will show a security warning due to the self-signed certificate. This is expected behavior for a lab environment.
+> **Note:** During installation, you will be prompted to enter a custom FQDN for the lab. The default value is `demo.testlab.lan`. Your browser will show a security warning due to the self-signed certificate. This is expected behavior for a lab environment.
 
 ## Architecture
 
 ```
                                     ┌─────────────────┐
-                                    │  demo.jwst.lan  │
+                                    │   <your-fqdn>   │
                                     └────────┬────────┘
                                              │
                                     ┌────────▼────────┐
@@ -98,10 +98,12 @@ The application will be available at:
 │   └── script.js                      # Express application
 ├── frontend/                          # Uses Nginx (configured in deploy script)
 ├── scripts/
+│   ├── install_prerequisites.sh       # Install runc, CNI plugins, etc.
 │   ├── install_k3s.sh                 # Install K3s, MetalLB, Traefik
 │   ├── deploy_sample_app.sh           # Deploy the 3-tier application
 │   ├── remove_sample_app.sh           # Remove application resources
 │   └── uninstall_all.sh               # Complete cleanup
+├── .lab-config                        # Lab FQDN config (auto-generated)
 ├── tls.crt                            # Self-signed certificate (auto-generated)
 ├── tls.key                            # Certificate private key (auto-generated)
 ├── sample-backend.tar                 # Pre-built backend image
@@ -112,6 +114,21 @@ The application will be available at:
 ```
 
 ## Configuration Details
+
+### Lab FQDN
+
+During the first run of `install_prerequisites.sh`, you will be prompted to enter a Fully Qualified Domain Name (FQDN) for the lab. This FQDN is used for:
+
+- TLS certificate generation (CN and SAN)
+- `/etc/hosts` entries
+- Traefik IngressRoute host matching
+- All service URLs
+
+The configuration is saved to `.lab-config` at the project root. If you want to change the FQDN after installation, you can either:
+1. Edit `.lab-config` manually and re-run `deploy_sample_app.sh`
+2. Run `install_prerequisites.sh` again to reconfigure
+
+**Default value:** `demo.testlab.lan`
 
 ### MetalLB Configuration
 
@@ -166,8 +183,8 @@ spec:
 
 | Setting | Value |
 |---------|-------|
-| Certificate CN | `demo.jwst.lan` |
-| Subject Alternative Name | `DNS:demo.jwst.lan` |
+| Certificate CN | `<your-fqdn>` (default: `demo.testlab.lan`) |
+| Subject Alternative Name | `DNS:<your-fqdn>` |
 | Validity | 365 days |
 | Kubernetes Secret | `demo-lab-local-tls` (in `sample-app` namespace) |
 | Key Size | RSA 2048-bit |
@@ -208,16 +225,16 @@ kubectl get middleware -n sample-app
 
 ```bash
 # Test HTTP redirect (should return 308)
-curl -I http://demo.jwst.lan
+curl -I http://<your-fqdn>
 # Expected: HTTP/1.1 308 Permanent Redirect
-#           Location: https://demo.jwst.lan/
+#           Location: https://<your-fqdn>/
 
 # Test HTTPS (should return 200)
-curl -kI https://demo.jwst.lan
+curl -kI https://<your-fqdn>
 # Expected: HTTP/2 200
 
 # Test full page load
-curl -k https://demo.jwst.lan
+curl -k https://<your-fqdn>
 ```
 
 ### Apply Network Policies
@@ -292,7 +309,7 @@ EOF
 
 3. Verify /etc/hosts entry:
    ```bash
-   grep demo.jwst.lan /etc/hosts
+   grep <your-fqdn> /etc/hosts
    ```
 
 ### MetalLB Installation Fails
@@ -318,8 +335,8 @@ Regenerate certificates:
 ```bash
 openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
   -keyout tls.key -out tls.crt \
-  -subj "/CN=demo.jwst.lan" \
-  -addext "subjectAltName=DNS:demo.jwst.lan"
+  -subj "/CN=<your-fqdn>" \
+  -addext "subjectAltName=DNS:<your-fqdn>"
 ```
 
 Then update the secret:

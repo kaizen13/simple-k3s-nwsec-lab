@@ -1,4 +1,9 @@
 #!/bin/bash
+# Force everything to point to the K3s/BuildKit sockets
+# K3s uses /run/k3s/containerd/containerd.sock (NOT /run/rancher/k3s/...)
+export CONTAINERD_ADDRESS="/run/k3s/containerd/containerd.sock"
+export CONTAINERD_NAMESPACE="k8s.io"
+export BUILDKIT_HOST="unix:///run/buildkit/buildkitd.sock"
 
 set -e  # Exit on error
 
@@ -39,6 +44,13 @@ echo ""
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
+# Load lab configuration
+CONFIG_FILE="$PROJECT_DIR/.lab-config"
+if [ -f "$CONFIG_FILE" ]; then
+  source "$CONFIG_FILE"
+fi
+LAB_FQDN="${LAB_FQDN:-demo.testlab.lan}"
+
 # Use kubectl wrapper for TLS verification
 KUBECTL=/usr/local/bin/kubectl-wrapper
 
@@ -68,22 +80,48 @@ echo "  Namespace 'sample-app' created/verified."
 echo ""
 
 # =============================================================================
+# Verify prerequisites
+# =============================================================================
+echo "Verifying prerequisites..."
+
+# Check nerdctl
+if ! sudo -E nerdctl version > /dev/null 2>&1; then
+  echo "Error: nerdctl is not working."
+  echo "Please run ./scripts/install_k3s.sh first."
+  exit 1
+fi
+echo "  nerdctl: OK"
+
+# Check BuildKit
+if ! sudo systemctl is-active --quiet buildkit; then
+  echo "  Starting BuildKit service..."
+  sudo systemctl start buildkit
+  sleep 2
+fi
+echo "  BuildKit: OK"
+
+# Verify containerd socket
+if [ ! -S "$CONTAINERD_ADDRESS" ]; then
+  echo "Error: Containerd socket not found at $CONTAINERD_ADDRESS"
+  echo "Is K3s running? Check with: sudo systemctl status k3s"
+  exit 1
+fi
+echo "  Containerd socket: OK"
+echo ""
+
+# =============================================================================
 # Clean up nerdctl cache
 # =============================================================================
-# Define the sockets (Ensure these match where they actually live on your disk)
-K3S_SOCK="/run/k3s/containerd/containerd.sock"
-BK_SOCK="unix:///run/buildkit/buildkitd.sock"
-
-# [2/6] Cleaning up nerdctl cache
+# [2/6] Cleaning up nerdctl cache...
 echo "[2/6] Cleaning up nerdctl cache..."
-sudo nerdctl --address "$K3S_SOCK" --buildkit-host "$BK_SOCK" system prune -a -f
+# Use -E to pass our exports into the sudo session
+sudo -E nerdctl system prune -a -f
 
-# [3/6] Building backend image
+# [3/6] Building backend image...
 echo "[3/6] Building backend image..."
 cd "$PROJECT_DIR/backend"
-sudo -E nerdctl --address "$K3S_SOCK" --namespace=k8s.io --buildkit-host "$BK_SOCK" build -t sample-backend:v1 .
-echo "  Backend image built: sample-backend:v1"
-echo ""
+# Use -E here as well and specify the namespace explicitly
+sudo -E nerdctl --namespace=k8s.io build -t sample-backend:v1 .
 
 # =============================================================================
 # Save and import image
@@ -228,8 +266,8 @@ echo "Creating TLS certificates..."
 cd "$PROJECT_DIR"
 openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
   -keyout tls.key -out tls.crt \
-  -subj "/CN=demo.jwst.lan" \
-  -addext "subjectAltName=DNS:demo.jwst.lan" 2>/dev/null
+  -subj "/CN=$LAB_FQDN" \
+  -addext "subjectAltName=DNS:$LAB_FQDN" 2>/dev/null
 
 # Set proper ownership for generated certificates
 sudo chown "$ORIGINAL_USER:$ORIGINAL_USER" tls.crt tls.key
@@ -255,8 +293,8 @@ echo ""
 # Update /etc/hosts
 # =============================================================================
 echo "Updating /etc/hosts..."
-if ! grep -q "demo.jwst.lan" /etc/hosts; then
-  echo "172.20.20.20 demo.jwst.lan" | sudo tee -a /etc/hosts > /dev/null
+if ! grep -q "$LAB_FQDN" /etc/hosts; then
+  echo "172.20.20.20 $LAB_FQDN" | sudo tee -a /etc/hosts > /dev/null
   echo "  Added entry to /etc/hosts"
 else
   echo "  Entry already exists in /etc/hosts"
@@ -267,7 +305,61 @@ echo ""
 # Deploy IngressRoute and Middleware
 # =============================================================================
 echo "Deploying IngressRoute and Middleware..."
-$KUBECTL apply -f "$PROJECT_DIR/backend/k8s/ingress-updated.yaml"
+$KUBECTL apply -f - <<EOF
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: sample-app-http
+  namespace: sample-app
+  labels:
+    app.kubernetes.io/name: sample-app
+    app.kubernetes.io/component: ingressroute
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(\`$LAB_FQDN\`)
+      kind: Rule
+      services:
+        - name: frontend
+          port: 80
+      middlewares:
+        - name: sample-app-redirect-https
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: sample-app-https
+  namespace: sample-app
+  labels:
+    app.kubernetes.io/name: sample-app
+    app.kubernetes.io/component: ingressroute
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(\`$LAB_FQDN\`)
+      kind: Rule
+      services:
+        - name: frontend
+          port: 80
+  tls:
+    secretName: demo-lab-local-tls
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: sample-app-redirect-https
+  namespace: sample-app
+  labels:
+    app.kubernetes.io/name: sample-app
+    app.kubernetes.io/component: middleware
+spec:
+  redirectScheme:
+    scheme: https
+    permanent: true
+    port: "443"
+EOF
 echo "  IngressRoute and Middleware deployed."
 echo ""
 
@@ -285,7 +377,7 @@ echo "Deployment Complete!"
 echo "=========================================="
 echo ""
 echo "Access the application at:"
-echo "  https://demo.jwst.lan"
+echo "  https://$LAB_FQDN"
 echo ""
 echo "Note: Your browser will show a security warning"
 echo "      due to the self-signed certificate."
