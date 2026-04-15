@@ -301,6 +301,7 @@ docker-compose*.local.yml
 .helm/
 helm-repos/
 charts/
+get_helm.sh
 
 # =============================================================================
 # TERRAFORM (if used later)
