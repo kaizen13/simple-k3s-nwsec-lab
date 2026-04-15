@@ -90,9 +90,7 @@ The application will be available at:
 ├── backend/
 │   ├── k8s/
 │   │   ├── backend-deployment.yaml    # Backend deployment, service, ConfigMap
-│   │   ├── ingress-updated.yaml       # Ingress + Middleware (HTTP→HTTPS redirect)
-│   │   ├── metallb-config.yaml        # MetalLB IP pool configuration
-│   │   └── middleware-redirect.yaml   # Standalone redirect Middleware
+│   │   └── metallb-config.yaml        # MetalLB IP pool configuration
 │   ├── Dockerfile                     # Backend container image
 │   ├── package.json                   # Node.js dependencies
 │   └── script.js                      # Express application
@@ -143,10 +141,10 @@ MetalLB is configured with the following settings:
 
 ### HTTP→HTTPS Redirect
 
-The redirect is implemented using a Traefik Middleware and IngressRoute CRDs:
+The redirect is implemented using a Traefik Middleware and IngressRoute CRDs (defined inline in `deploy_sample_app.sh`):
 
 ```yaml
-apiVersion: traefik.io/v1alpha1  # Use traefik.io for Traefik v3.x
+apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:
   name: sample-app-redirect-https
@@ -168,7 +166,7 @@ spec:
   entryPoints:
     - web
   routes:
-    - match: Host(`demo.jwst.lan`)
+    - match: Host(`<your-fqdn>`)
       kind: Rule
       services:
         - name: frontend
