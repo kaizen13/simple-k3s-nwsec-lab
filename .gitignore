@@ -1,0 +1,395 @@
+# =============================================================================
+# K3s Network Security Lab - .gitignore
+# Security-focused .gitignore for public repository
+# =============================================================================
+
+# =============================================================================
+# SECURITY SENSITIVE FILES (NEVER COMMIT)
+# =============================================================================
+
+# TLS/SSL Certificates and Private Keys
+# Note: Generate your own certificates using the deploy script
+*.key
+*.pem
+*.p12
+*.pfx
+tls.key
+tls.crt
+*.crt
+*.csr
+*.cer
+certs/
+certificates/
+secrets/
+ca/
+
+# Kubernetes Secrets and Credentials
+*-secret.yaml
+*-secrets.yaml
+*secret*.yaml
+*secret*.yml
+kubeconfig
+kubeconfig.yaml
+kubeconfig.yml
+.kube/config
+*.kubeconfig
+
+# Environment Files (may contain secrets)
+*.env
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+.env.test
+.lab-config
+
+# Authentication Tokens
+*.token
+*token*.txt
+*credential*
+
+# SSH Keys
+*.pub
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*
+*.ppk
+ssh_keys/
+
+# =============================================================================
+# KUBERNETES LOCAL OVERRIDES
+# =============================================================================
+
+# Local kubectl overrides
+*-local.yaml
+*-local.yml
+override.yaml
+override.yml
+local.yaml
+local.yml
+
+# Temporary kubectl configs
+/tmp/kubeconfig*
+.kube/tmp/
+
+# =============================================================================
+# BUILD ARTIFACTS
+# =============================================================================
+
+# Container images and tarballs
+*.tar
+*.tar.gz
+*.tgz
+*.oci
+*.docker
+*.sbom.json
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+
+# Java
+*.class
+*.jar
+*.war
+*.ear
+target/
+build/
+
+# =============================================================================
+# IDE AND EDITOR FILES
+# =============================================================================
+
+# JetBrains IDEs (IntelliJ, WebStorm, etc.)
+.idea/
+*.iml
+*.ipr
+*.iws
+out/
+
+# VS Code
+.vscode/
+*.code-workspace
+.code-workspace
+
+# Vim
+*.swp
+*.swo
+*~
+.netrwhist
+*.vmdk
+
+# Emacs
+*~
+\#*\#
+.*.elc
+*.elc
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Eclipse
+.project
+.classpath
+.settings/
+bin/
+
+# =============================================================================
+# OPERATING SYSTEM FILES
+# =============================================================================
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.DocumentRevisions-V100/
+.fseventsd/
+.Spotlight-V100/
+.TemporaryItems/
+.Trashes/
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.msu
+
+# Linux
+*~
+.fuse_hidden*
+.Trash-*
+.nfs*
+.directory
+
+# =============================================================================
+# LOGS AND TEMPORARY FILES
+# =============================================================================
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+*.log.*
+
+# Temporary files
+tmp/
+temp/
+.tmp/
+*.tmp
+*.temp
+.cache/
+.tmp/
+
+# Backup files
+*.bak
+*.backup
+*.old
+*.orig
+*.save
+
+# =============================================================================
+# TESTING AND COVERAGE
+# =============================================================================
+
+# Test coverage
+coverage/
+.nyc_output/
+*.lcov
+.cobertura.xml
+*.cover
+*.coverage
+.coverage
+
+# Test results
+test-results/
+junit.xml
+test-output/
+
+# Jest
+jest-results/
+
+# =============================================================================
+# DOCUMENTATION GENERATED FILES
+# =============================================================================
+
+# Documentation builds
+docs/_build/
+site/
+public/
+html/
+generated/
+
+# =============================================================================
+# GIT
+# =============================================================================
+
+# Git directory (should never be committed)
+.git/
+.gitattributes
+.gitmodules
+
+# Git logs
+.gitlogs/
+
+# =============================================================================
+# DOCKER
+# =============================================================================
+
+# Docker
+.dockerignore
+docker-compose*.override.yml
+docker-compose*.local.yml
+
+# =============================================================================
+# HELM
+# =============================================================================
+
+# Helm
+*.tgz
+.helm/
+helm-repos/
+charts/
+
+# =============================================================================
+# TERRAFORM (if used later)
+# =============================================================================
+
+# Terraform state (contains secrets!)
+*.tfstate
+*.tfstate.backup
+*.tfstate.lock
+*.tfplan
+*.tfplan.json
+.terraform/
+*.tfvars
+*.tfvars.json
+
+# =============================================================================
+# ANSIBLE (if used later)
+# =============================================================================
+
+# Ansible vault (contains secrets!)
+*.vault
+vault.yml
+vault.yaml
+*vault*.yml
+*vault*.yaml
+ansible_vault/
+
+# =============================================================================
+# MISCELLANEOUS
+# =============================================================================
+
+# Qwen Code specific (keep settings but ignore history)
+.qwen/settings.json.orig
+.qwen/settings.json
+.qwen/history/
+.qwen/output/
+QWEN.md
+
+# Screenshots
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.webp
+!*.svg
+
+# Videos
+*.mp4
+*.mov
+*.avi
+*.mkv
+
+# Audio
+*.mp3
+*.wav
+*.ogg
+
+# Large binary files
+*.bin
+*.dat
+
+# Compressed archives
+*.zip
+*.rar
+*.7z
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+*.sql
+
+# =============================================================================
+# ALLOWED FILES (Explicit inclusions)
+# =============================================================================
+
+# Keep these for documentation purposes
+!README.md
+#!QWEN.md
+!LICENSE
+!CHANGELOG.md
+!CONTRIBUTING.md
+
+# Keep example/placeholder files (without actual secrets)
+# !*.example
+# !*.template
+# !*.dist
+
+# =============================================================================
+# END OF GITIGNORE
+# =============================================================================

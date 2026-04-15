@@ -1,0 +1,28 @@
+# MetalLB Configuration
+# This configuration provides external IPs for Traefik ingress controller
+# IP Range: 172.20.20.20-172.20.20.40 (21 addresses)
+
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: ingress-pool
+  namespace: metallb-system
+spec:
+  addresses:
+  - 172.20.20.20-172.20.20.40
+  autoAssign: true
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: l2-advertisement
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+  - ingress-pool
+  nodeSelectors:
+  - matchExpressions:
+    - key: kubernetes.io/os
+      operator: In
+      values:
+      - linux
