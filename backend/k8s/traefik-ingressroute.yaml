@@ -1,0 +1,13 @@
+apiVersion: traefik.containo.us/v1alpha1
+kind: IngressRoute
+metadata:
+  name: backend
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`example.local`) && PathPrefix(`/api`)
+      kind: Rule
+      services:
+        - name: backend
+          port: 3000
